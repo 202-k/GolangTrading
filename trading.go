@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"encoding/csv"
 	"fmt"
 	"github.com/sangx2/upbit"
 	"github.com/sangx2/upbit/model/exchange"
@@ -42,7 +41,7 @@ func (c *coin) MakeTradable() {
 	c.tradable = true
 }
 
-func (c *coin) GetRecentFall(u upbit.Upbit) {
+func (c *coin) GetRecentFall(u *upbit.Upbit) {
 	time.Sleep(100000000)
 	candles, _, err := u.GetMinuteCandles(c.name, "", "200", "10")
 	for err != nil {
@@ -86,6 +85,8 @@ func GetWallet(u *upbit.Upbit, coins map[string]*coin) {
 			name := "KRW-" + a.Currency
 			coins[name].holdings = true
 			coins[name].volume, err = strconv.ParseFloat(a.Balance, 32)
+			coins[name].tradable = false
+			coins[name].tradableTime = time.Now().Add(time.Minute * 10)
 			if err != nil {
 				fmt.Println("Err in GetWallet : ", err)
 			}
@@ -108,14 +109,15 @@ func GetKRWMarkets(u *upbit.Upbit) []*quotation.Market {
 	return krw
 }
 
-func (c *coin) CheckTradablility() {
+func (c *coin) CheckTradablility(u *upbit.Upbit) {
 	if c.tradableTime.Before(time.Now()) {
 		c.tradable = true
+		c.GetRecentFall(u)
 	}
 }
 
 func (c *coin) CheckCoinStatus(u *upbit.Upbit) (string, float64) {
-	c.CheckTradablility()
+	c.CheckTradablility(u)
 	if c.tradable {
 		time.Sleep(200000000)
 		candle, _, err := u.GetMinuteCandles(c.name, "", "20", "10")
@@ -184,7 +186,6 @@ func TradeCoin(u *upbit.Upbit, coins []*coin) {
 		action, price := c.CheckCoinStatus(u)
 		if action == "buy" {
 			c.BuyOrder(u, price, 6000)
-
 		} else if action == "sell" {
 			c.SellOrder(u, 1)
 		} else if time.Now().Before(c.orderTime.Add(time.Minute * 3)) {
@@ -224,7 +225,7 @@ func main() {
 	for _, market := range markets {
 		name := market.Market
 		coins[name] = &coin{name: name, holdings: false, volume: 0, recentFall: false, tradable: true}
-		coins[name].GetRecentFall(*u)
+		coins[name].GetRecentFall(u)
 		coingroup[count] = append(coingroup[count], coins[name])
 		count += 1
 		count %= 5
@@ -247,13 +248,6 @@ func main() {
 	api := slack.New(token)
 
 	var wait sync.WaitGroup
-	file, err := os.OpenFile("./records.csv", os.O_APPEND|os.O_WRONLY, 0644)
-	if err != nil {
-		panic(err)
-	}
-	defer file.Close()
-	wr := csv.NewWriter(bufio.NewWriter(file))
-	defer wr.Flush()
 	sent := false
 	// find coins to buy or sell
 	for {
@@ -282,7 +276,6 @@ func main() {
 		if now.Minute()%30 == 0 && sent == false {
 			account, _, _ := u.GetAccounts()
 			for _, a := range account {
-				wr.Write([]string{now.String(), a.Currency, a.Balance})
 				text := "avg buy price : " + a.AvgBuyPrice + ", total : " + a.Balance
 				attachment := slack.Attachment{
 					Title: a.Currency,
