@@ -19,6 +19,7 @@ type coin struct {
 	name         string
 	holdings     bool
 	volume       float64
+	avgprice     float64
 	recentFall   bool
 	tradable     bool
 	tradableTime time.Time
@@ -87,6 +88,7 @@ func GetWallet(u *upbit.Upbit, coins map[string]*coin) {
 			coins[name].volume, err = strconv.ParseFloat(a.Balance, 32)
 			coins[name].tradable = false
 			coins[name].tradableTime = time.Now().Add(time.Minute * 10)
+			coins[name].avgprice, _ = strconv.ParseFloat(a.AvgBuyPrice, 32)
 			if err != nil {
 				fmt.Println("Err in GetWallet : ", err)
 			}
@@ -131,9 +133,9 @@ func (c *coin) CheckCoinStatus(u *upbit.Upbit) (string, float64) {
 				sum += candle[i].TradePrice
 			}
 			currentPrice := candle[0].TradePrice
-			if currentPrice >= sum/20*1.03 {
+			if currentPrice >= sum/20*1.03 && currentPrice <= sum/20*1.05 {
 				return "buy", currentPrice
-			} else if currentPrice <= sum/20*0.97 {
+			} else if currentPrice <= sum/20*0.97 || currentPrice <= c.avgprice*0.95 {
 				return "sell", currentPrice
 			}
 		}
@@ -153,7 +155,7 @@ func (c *coin) BuyOrder(u *upbit.Upbit, price float64, amount float64) {
 	c.uuid = order.UUID
 	c.tradable = false
 	c.orderTime = time.Now()
-	c.tradableTime = c.orderTime.Add(time.Minute * 30)
+	c.tradableTime = c.orderTime.Add(time.Minute * 15)
 	time.Sleep(200000000)
 }
 
@@ -188,7 +190,7 @@ func TradeCoin(u *upbit.Upbit, coins []*coin) {
 			c.BuyOrder(u, price, 6000)
 		} else if action == "sell" {
 			c.SellOrder(u, 1)
-		} else if time.Now().Before(c.orderTime.Add(time.Minute * 3)) {
+		} else if time.Now().Before(c.orderTime.Add(time.Minute * 4)) {
 			c.CheckOrderResult(u)
 		}
 		//fmt.Println(c.name, action)
@@ -204,6 +206,7 @@ func main() {
 	//reader := bufio.NewReader(os.Stdin)
 	writer := bufio.NewWriter(os.Stdout)
 	defer writer.Flush()
+	fmt.Fprintln(writer, "start!!!")
 	f, err := os.Open("key")
 	if err != nil {
 		fmt.Fprintln(writer, err)
@@ -219,14 +222,15 @@ func main() {
 
 	markets := GetKRWMarkets(u)
 	coins := make(map[string]*coin)
-	coingroup := make(map[int][]*coin)
+	coinGroup := make(map[int][]*coin)
 	// when execute first
 	count := 0
 	for _, market := range markets {
 		name := market.Market
 		coins[name] = &coin{name: name, holdings: false, volume: 0, recentFall: false, tradable: true}
 		coins[name].GetRecentFall(u)
-		coingroup[count] = append(coingroup[count], coins[name])
+		//coinGroup[count][name] = coins[name]
+		coinGroup[count] = append(coinGroup[count], coins[name])
 		count += 1
 		count %= 5
 	}
@@ -247,6 +251,13 @@ func main() {
 	token := scanner.Text()
 	api := slack.New(token)
 
+	text := "trading start"
+	attachment := slack.Attachment{
+		Text: text,
+	}
+	api.PostMessage("coin", slack.MsgOptionText("", false),
+		slack.MsgOptionAttachments(attachment))
+
 	var wait sync.WaitGroup
 	sent := false
 	// find coins to buy or sell
@@ -254,26 +265,27 @@ func main() {
 		wait.Add(5)
 		go func() {
 			defer wait.Done()
-			TradeCoin(u, coingroup[0])
+			TradeCoin(u, coinGroup[0])
 		}()
 		go func() {
 			defer wait.Done()
-			TradeCoin(u, coingroup[1])
+			TradeCoin(u, coinGroup[1])
 		}()
 		go func() {
 			defer wait.Done()
-			TradeCoin(u, coingroup[2])
+			TradeCoin(u, coinGroup[2])
 		}()
 		go func() {
 			defer wait.Done()
-			TradeCoin(u, coingroup[3])
+			TradeCoin(u, coinGroup[3])
 		}()
 		go func() {
 			defer wait.Done()
-			TradeCoin(u, coingroup[4])
+			TradeCoin(u, coinGroup[4])
 		}()
 		now := time.Now()
 		if now.Minute()%30 == 0 && sent == false {
+			GetWallet(u, coins)
 			account, _, _ := u.GetAccounts()
 			for _, a := range account {
 				text := "avg buy price : " + a.AvgBuyPrice + ", total : " + a.Balance
