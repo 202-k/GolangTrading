@@ -108,7 +108,7 @@ func GetAvgBuyPrice(u *upbit.Upbit, coins map[string]*coin) {
 			coins[name].volume, err = strconv.ParseFloat(a.Balance, 64)
 			coins[name].avgprice, _ = strconv.ParseFloat(a.AvgBuyPrice, 64)
 			if err != nil {
-				fmt.Println("Err in GetWallet : ", err)
+				fmt.Println("Err in GetAvgBuyPrice : ", err)
 			}
 		}
 	}
@@ -150,8 +150,9 @@ func (c *coin) CheckCoinStatus(u *upbit.Upbit) (string, float64) {
 			sum += candle[i].TradePrice
 		}
 		currentPrice := candle[0].TradePrice
+		openPrice := candle[0].OpeningPrice
 		if c.tradable {
-			if currentPrice >= sum/20*1.03 && currentPrice <= sum/20*1.05 {
+			if currentPrice >= sum/20*1.03 && currentPrice <= sum/20*1.05 && openPrice <= sum/20*1.03 {
 				return "buy", currentPrice
 			}
 		} else if c.holdings {
@@ -194,7 +195,7 @@ func (c *coin) CheckOrderResult(u *upbit.Upbit) {
 	if err != nil {
 		log.Fatal("CheckOrderResult", err)
 	}
-	if order.State == exchange.ORDER_STATE_WAIT && time.Now().After(c.orderTime.Add(time.Minute*3)) {
+	if order.State == exchange.ORDER_STATE_WAIT && time.Now().After(c.orderTime.Add(time.Minute*4)) {
 		u.CancelOrder(c.uuid, "")
 		c.tradable = true
 		c.tradableTime = time.Now()
@@ -211,7 +212,7 @@ func TradeCoin(u *upbit.Upbit, coins []*coin) {
 			c.BuyOrder(u, price, 6000)
 		} else if action == "sell" {
 			c.SellOrder(u, 1)
-		} else if time.Now().Before(c.orderTime.Add(time.Minute * 4)) {
+		} else if time.Now().Before(c.orderTime.Add(time.Minute * 5)) {
 			c.CheckOrderResult(u)
 		}
 		//fmt.Println(c.name, action)
