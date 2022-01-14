@@ -85,10 +85,28 @@ func GetWallet(u *upbit.Upbit, coins map[string]*coin) {
 		if a.Currency != "KRW" {
 			name := "KRW-" + a.Currency
 			coins[name].holdings = true
-			coins[name].volume, err = strconv.ParseFloat(a.Balance, 32)
+			coins[name].volume, err = strconv.ParseFloat(a.Balance, 64)
 			coins[name].tradable = false
 			coins[name].tradableTime = time.Now().Add(time.Minute * 10)
-			coins[name].avgprice, _ = strconv.ParseFloat(a.AvgBuyPrice, 32)
+			coins[name].avgprice, _ = strconv.ParseFloat(a.AvgBuyPrice, 64)
+			if err != nil {
+				fmt.Println("Err in GetWallet : ", err)
+			}
+		}
+	}
+}
+
+func GetAvgBuyPrice(u *upbit.Upbit, coins map[string]*coin) {
+	var err error
+	account, _, err := u.GetAccounts()
+	if err != nil {
+		log.Fatal("GetAvgBuyPrice", err)
+	}
+	for _, a := range account {
+		if a.Currency != "KRW" {
+			name := "KRW-" + a.Currency
+			coins[name].volume, err = strconv.ParseFloat(a.Balance, 64)
+			coins[name].avgprice, _ = strconv.ParseFloat(a.AvgBuyPrice, 64)
 			if err != nil {
 				fmt.Println("Err in GetWallet : ", err)
 			}
@@ -120,33 +138,36 @@ func (c *coin) CheckTradablility(u *upbit.Upbit) {
 
 func (c *coin) CheckCoinStatus(u *upbit.Upbit) (string, float64) {
 	c.CheckTradablility(u)
-	if c.tradable {
-		time.Sleep(200000000)
-		candle, _, err := u.GetMinuteCandles(c.name, "", "20", "10")
-		num := len(candle)
-		if num == 20 {
-			if err != nil {
-				fmt.Println("Err in CheckCoinStatus : ", err)
-			}
-			var sum float64
-			for i := 0; i < num; i++ {
-				sum += candle[i].TradePrice
-			}
-			currentPrice := candle[0].TradePrice
+	time.Sleep(200000000)
+	candle, _, err := u.GetMinuteCandles(c.name, "", "20", "10")
+	num := len(candle)
+	if num == 20 {
+		if err != nil {
+			fmt.Println("Err in CheckCoinStatus : ", err)
+		}
+		var sum float64
+		for i := 0; i < num; i++ {
+			sum += candle[i].TradePrice
+		}
+		currentPrice := candle[0].TradePrice
+		if c.tradable {
 			if currentPrice >= sum/20*1.03 && currentPrice <= sum/20*1.05 {
 				return "buy", currentPrice
-			} else if currentPrice <= sum/20*0.97 || currentPrice <= c.avgprice*0.95 {
+			}
+		} else if c.holdings {
+			if currentPrice <= sum/20*0.97 || currentPrice <= c.avgprice*0.95 {
 				return "sell", currentPrice
 			}
 		}
 	}
+
 	return "keep", -1
 }
 
 func (c *coin) BuyOrder(u *upbit.Upbit, price float64, amount float64) {
 	v := amount / price
-	volume := strconv.FormatFloat(v, 'f', -1, 32)
-	p := strconv.FormatFloat(price, 'f', -1, 32)
+	volume := strconv.FormatFloat(v, 'f', -1, 64)
+	p := strconv.FormatFloat(price, 'f', -1, 64)
 	order, _, err := u.PurchaseOrder(c.name, volume, p, exchange.ORDER_TYPE_LIMIT, "")
 	if err != nil {
 		log.Fatal("BuyOrder", err)
@@ -155,13 +176,13 @@ func (c *coin) BuyOrder(u *upbit.Upbit, price float64, amount float64) {
 	c.uuid = order.UUID
 	c.tradable = false
 	c.orderTime = time.Now()
-	c.tradableTime = c.orderTime.Add(time.Minute * 15)
+	c.tradableTime = c.orderTime.Add(time.Hour)
 	time.Sleep(200000000)
 }
 
 func (c *coin) SellOrder(u *upbit.Upbit, amount float64) {
 	v := c.volume * amount
-	volume := strconv.FormatFloat(v, 'f', -1, 32)
+	volume := strconv.FormatFloat(v, 'f', -1, 64)
 	u.SellOrder(c.name, volume, "", exchange.ORDER_TYPE_MARKET, "")
 	c.volume -= v
 	c.EncounterFalling(time.Now())
@@ -177,7 +198,7 @@ func (c *coin) CheckOrderResult(u *upbit.Upbit) {
 		u.CancelOrder(c.uuid, "")
 		c.tradable = true
 		c.tradableTime = time.Now()
-		v, _ := strconv.ParseFloat(order.Volume, 32)
+		v, _ := strconv.ParseFloat(order.Volume, 64)
 		c.volume -= v
 	}
 	time.Sleep(200000000)
@@ -264,28 +285,28 @@ func main() {
 	for {
 		wait.Add(5)
 		go func() {
-			defer wait.Done()
 			TradeCoin(u, coinGroup[0])
+			wait.Done()
 		}()
 		go func() {
-			defer wait.Done()
 			TradeCoin(u, coinGroup[1])
+			wait.Done()
 		}()
 		go func() {
-			defer wait.Done()
 			TradeCoin(u, coinGroup[2])
+			wait.Done()
 		}()
 		go func() {
-			defer wait.Done()
 			TradeCoin(u, coinGroup[3])
+			wait.Done()
 		}()
 		go func() {
-			defer wait.Done()
 			TradeCoin(u, coinGroup[4])
+			wait.Done()
 		}()
 		now := time.Now()
 		if now.Minute()%30 == 0 && sent == false {
-			GetWallet(u, coins)
+			GetAvgBuyPrice(u, coins)
 			account, _, _ := u.GetAccounts()
 			for _, a := range account {
 				text := "avg buy price : " + a.AvgBuyPrice + ", total : " + a.Balance
