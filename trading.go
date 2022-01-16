@@ -7,7 +7,6 @@ import (
 	"github.com/sangx2/upbit/model/exchange"
 	"github.com/sangx2/upbit/model/quotation"
 	"github.com/slack-go/slack"
-	"log"
 	"os"
 	"strconv"
 	"sync"
@@ -79,7 +78,7 @@ func GetWallet(u *upbit.Upbit, coins map[string]*coin) {
 	var err error
 	account, _, err := u.GetAccounts()
 	if err != nil {
-		log.Fatal("GetWallet", err)
+		fmt.Println("GetWallet", err)
 	}
 	for _, a := range account {
 		if a.Currency != "KRW" {
@@ -100,7 +99,7 @@ func GetAvgBuyPrice(u *upbit.Upbit, coins map[string]*coin) {
 	var err error
 	account, _, err := u.GetAccounts()
 	if err != nil {
-		log.Fatal("GetAvgBuyPrice", err)
+		fmt.Println("GetAvgBuyPrice", err)
 	}
 	for _, a := range account {
 		if a.Currency != "KRW" {
@@ -171,7 +170,7 @@ func (c *coin) BuyOrder(u *upbit.Upbit, price float64, amount float64) {
 	p := strconv.FormatFloat(price, 'f', -1, 64)
 	order, _, err := u.PurchaseOrder(c.name, volume, p, exchange.ORDER_TYPE_LIMIT, "")
 	if err != nil {
-		log.Fatal("BuyOrder", err)
+		fmt.Println("BuyOrder", err)
 	}
 	c.volume += v
 	c.uuid = order.UUID
@@ -193,7 +192,7 @@ func (c *coin) SellOrder(u *upbit.Upbit, amount float64) {
 func (c *coin) CheckOrderResult(u *upbit.Upbit) {
 	order, _, err := u.GetOrder(c.uuid, "")
 	if err != nil {
-		log.Fatal("CheckOrderResult", err)
+		fmt.Println("CheckOrderResult", err)
 	}
 	if order.State == exchange.ORDER_STATE_WAIT && time.Now().After(c.orderTime.Add(time.Minute*4)) {
 		u.CancelOrder(c.uuid, "")
