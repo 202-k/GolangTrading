@@ -19,6 +19,7 @@ type coin struct {
 	holdings     bool
 	volume       float64
 	avgprice     float64
+	highest      float64
 	recentFall   bool
 	tradable     bool
 	tradableTime time.Time
@@ -149,13 +150,18 @@ func (c *coin) CheckCoinStatus(u *upbit.Upbit) (string, float64) {
 			sum += candle[i].TradePrice
 		}
 		currentPrice := candle[0].TradePrice
+		if c.holdings {
+			if currentPrice > c.highest {
+				c.highest = currentPrice
+			}
+		}
 		openPrice := candle[0].OpeningPrice
 		if c.tradable {
 			if currentPrice >= sum/20*1.03 && currentPrice <= sum/20*1.05 && openPrice <= sum/20*1.03 {
 				return "buy", currentPrice
 			}
 		} else if c.holdings {
-			if currentPrice <= sum/20*0.97 || currentPrice <= c.avgprice*0.95 {
+			if currentPrice <= sum/20*0.97 || currentPrice <= c.avgprice*0.95 || currentPrice <= c.highest*0.95 {
 				return "sell", currentPrice
 			}
 		}
@@ -175,6 +181,7 @@ func (c *coin) BuyOrder(u *upbit.Upbit, price float64, amount float64) {
 	c.volume += v
 	c.uuid = order.UUID
 	c.tradable = false
+	c.holdings = true
 	c.orderTime = time.Now()
 	c.tradableTime = c.orderTime.Add(time.Hour)
 	time.Sleep(200000000)
@@ -185,6 +192,7 @@ func (c *coin) SellOrder(u *upbit.Upbit, amount float64) {
 	volume := strconv.FormatFloat(v, 'f', -1, 64)
 	u.SellOrder(c.name, volume, "", exchange.ORDER_TYPE_MARKET, "")
 	c.volume -= v
+	c.holdings = false
 	c.EncounterFalling(time.Now())
 	time.Sleep(200000000)
 }
@@ -197,6 +205,7 @@ func (c *coin) CheckOrderResult(u *upbit.Upbit) {
 	if order.State == exchange.ORDER_STATE_WAIT && time.Now().After(c.orderTime.Add(time.Minute*4)) {
 		u.CancelOrder(c.uuid, "")
 		c.tradable = true
+		c.holdings = false
 		c.tradableTime = time.Now()
 		v, _ := strconv.ParseFloat(order.Volume, 64)
 		c.volume -= v
